@@ -223,7 +223,11 @@ def revert_update_lcm(function):
                             'href': instance_url},
                         'vnfLcmOpOcc': {
                             'href': lcm_url}}
-                    self.send_notification(context, notification)
+
+                    vnf_instance = objects.VnfInstance.get_by_id(context,
+                                                                 vnf_obj.id)
+                    self.send_notification(context, notification,
+                                           [vnf_instance])
 
                 except Exception as msg:
                     LOG.error("revert_update_lcm failed %s" % str(msg))
@@ -281,7 +285,8 @@ def grant_error_common(function):
                     notification['_links']['vnfInstance']['href'] = insta_url
                     notification['_links']['vnfLcmOpOcc'] = {}
                     notification['_links']['vnfLcmOpOcc']['href'] = vnflcm_url
-                    self.send_notification(context, notification)
+                    self.send_notification(context, notification,
+                                           [vnf_instance])
                 except Exception as e:
                     LOG.warning("Failed notification for vnf "
                                 "instance %(id)s. Error: %(error)s",
@@ -1447,13 +1452,14 @@ class Conductor(manager.Manager):
                     notification_data['error'] = error
 
             # send notification
-            self.send_notification(context, notification_data)
+            self.send_notification(context, notification_data,
+                                   [old_vnf_instance, vnf_instance])
         except Exception as ex:
             LOG.error(
                 "Failed to send notification {}. Details: {}".format(
                     vnf_lcm_op_occs_id, str(ex)))
 
-    def send_notification(self, context, notification):
+    def send_notification(self, context, notification, vnf_instances=None):
         try:
             LOG.debug("send_notification start notification[%s]"
                       % notification)
@@ -1462,14 +1468,17 @@ class Conductor(manager.Manager):
                 vnf_lcm_subscriptions = \
                     objects.LccnSubscriptionRequest.vnf_lcm_subscriptions_get(
                         context,
+                        notification_type=notification.get('notificationType'),
                         operation_type=notification.get('operation'),
-                        notification_type=notification.get('notificationType')
+                        operation_state=notification.get('operationState'),
+                        vnf_instances=vnf_instances
                     )
             else:
                 vnf_lcm_subscriptions = \
                     objects.LccnSubscriptionRequest.vnf_lcm_subscriptions_get(
                         context,
-                        notification_type=notification.get('notificationType')
+                        notification_type=notification.get('notificationType'),
+                        vnf_instances=vnf_instances
                     )
             if not vnf_lcm_subscriptions:
                 LOG.warn(
@@ -1854,7 +1863,9 @@ class Conductor(manager.Manager):
                 'vnfLcmOpOcc': {
                     'href': lcm_url}}}
 
-        self.send_notification(context, notification_data)
+        vnf_instance = objects.VnfInstance.get_by_id(
+            context, vnf_lcm_opoccs.get('vnf_instance_id'))
+        self.send_notification(context, notification_data, [vnf_instance])
 
         # update vnf_instances
         try:
@@ -1896,7 +1907,7 @@ class Conductor(manager.Manager):
         notification_data['notificationStatus'] = 'RESULT'
         notification_data['operationState'] = 'COMPLETED'
         notification_data['changed_info'] = changed_info.to_dict()
-        self.send_notification(context, notification_data)
+        self.send_notification(context, notification_data, [vnf_instance])
 
     @coordination.synchronized('{vnf_instance[id]}')
     def rollback(self, context, vnf_info, vnf_instance, operation_params):

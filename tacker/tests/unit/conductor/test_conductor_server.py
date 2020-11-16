@@ -2471,10 +2471,13 @@ class TestConductor(SqlTestCase, unit_base.FixturedTestCase):
     @mock.patch.object(t_context.get_admin_context().session, "add")
     @mock.patch.object(objects.vnf_lcm_op_occs.VnfLcmOpOcc, "save")
     @mock.patch.object(objects.VnfInstance, "update")
+    @mock.patch.object(objects.VnfInstance, "get_by_id")
     @mock.patch.object(objects.vnf_lcm_op_occs.VnfLcmOpOcc, "create")
-    def test_update(self, mock_create, mock_update, mock_save, mock_add,
-                    mock_revert):
+    def test_update(self, mock_create, mock_get_by_id, mock_update, mock_save,
+                    mock_add, mock_revert):
         mock_create.return_value = "OK"
+        mock_get_by_id.return_value = fakes.return_vnf_instance(
+            fields.VnfInstanceState.INSTANTIATED)
         mock_update.return_value = datetime.datetime(
             1900, 1, 1, 1, 1, 1, tzinfo=iso8601.UTC)
         mock_add.return_value = "OK"
@@ -2492,11 +2495,15 @@ class TestConductor(SqlTestCase, unit_base.FixturedTestCase):
     @mock.patch.object(t_context.get_admin_context().session, "add")
     @mock.patch.object(objects.vnf_lcm_op_occs.VnfLcmOpOcc, "save")
     @mock.patch.object(objects.VnfInstance, "update")
+    @mock.patch.object(objects.VnfInstance, "get_by_id")
     @mock.patch.object(objects.vnf_lcm_op_occs.VnfLcmOpOcc, "create")
     def test_update_lcm_with_vnf_pkg_id(self, mock_create,
-                                        mock_update, mock_save,
-                                        mock_add, mock_revert):
+                                        mock_get_by_id, mock_update,
+                                        mock_save, mock_add,
+                                        mock_revert):
         mock_create.return_value = "OK"
+        mock_get_by_id.return_value = fakes.return_vnf_instance(
+            fields.VnfInstanceState.INSTANTIATED)
         mock_update.return_value = datetime.datetime(
             1900, 1, 1, 1, 1, 1, tzinfo=iso8601.UTC)
         mock_add.return_value = "OK"

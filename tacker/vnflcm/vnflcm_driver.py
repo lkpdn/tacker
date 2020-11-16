@@ -130,7 +130,8 @@ def revert_to_error_scale(function):
                         notification['affectedVirtualStorages'] =\
                             jsonutils.dump_as_bytes(
                             resource_dict.get('affected_virtual_storages'))
-                    self.rpc_api.send_notification(context, notification)
+                    self.rpc_api.send_notification(context, notification,
+                                                   [vnf_instance])
                 except Exception as e:
                     LOG.warning("Failed to revert scale info for vnf "
                                 "instance %(id)s. Error: %(error)s",
@@ -737,7 +738,7 @@ class VnfLcmDriver(abstract_driver.VnfInstanceAbstractDriver):
         if resource_dict.get('affected_virtual_storages'):
             notification['affectedVirtualStorages'] =\
                 resource_dict.get('affected_virtual_storages')
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
     def _scale_resource_update(self, context, vnf_info, vnf_instance,
                                scale_vnf_request,
@@ -921,7 +922,7 @@ class VnfLcmDriver(abstract_driver.VnfInstanceAbstractDriver):
 
         notification = vnf_info['notification']
         notification['operationState'] = 'PROCESSING'
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
         vim_info = vnflcm_utils._get_vim(context,
             vnf_instance.vim_connection_info)
@@ -1373,7 +1374,7 @@ class VnfLcmDriver(abstract_driver.VnfInstanceAbstractDriver):
         if resource_dict.get('affected_virtual_storages'):
             notification['affectedVirtualStorages'] = \
                 resource_dict.get('affected_virtual_storages')
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
     @log.log
     @revert_to_error_rollback
@@ -1420,7 +1421,7 @@ class VnfLcmDriver(abstract_driver.VnfInstanceAbstractDriver):
         notification['_links']['vnfLcmOpOcc']['href'] = vnflcm_url
         vnf_info['notification'] = notification
         vnf_lcm_op_occs.save()
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
         vim_info = vnflcm_utils._get_vim(context,
             vnf_instance.vim_connection_info)

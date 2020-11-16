@@ -294,6 +294,11 @@ class VnfLcmFilters(model_base.BASE):
             length=__maxsize__),
         nullable=True)
     operation_types_len = sa.Column(sa.Integer, nullable=True)
+    operation_states = sa.Column(
+        sa.LargeBinary(
+            length=__maxsize__),
+        nullable=True)
+    operation_states_len = sa.Column(sa.Integer, nullable=True)
 
 
 class VnfLcmOpOccs(model_base.BASE, models.SoftDeleteMixin,

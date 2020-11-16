@@ -103,7 +103,12 @@ class VNFLcmRPCAPI(object):
                           vnf_instance=vnf_instance,
                           scale_vnf_request=scale_vnf_request)
 
-    def send_notification(self, context, notification, cast=True):
+    def send_notification(
+            self,
+            context,
+            notification,
+            vnf_instances=None,
+            cast=True):
         serializer = objects_base.TackerObjectSerializer()
 
         client = rpc.get_client(self.target, version_cap=None,
@@ -111,7 +116,8 @@ class VNFLcmRPCAPI(object):
         cctxt = client.prepare()
         rpc_method = cctxt.cast if cast else cctxt.call
         return rpc_method(context, 'send_notification',
-                          notification=notification)
+                          notification=notification,
+                          vnf_instances=vnf_instances)
 
     def rollback(self, context, vnf_info, vnf_instance,
             operation_params, cast=True):

@@ -10,6 +10,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
+
 from oslo_log import log as logging
 from oslo_utils import timeutils
 from sqlalchemy.sql import text
@@ -42,62 +44,6 @@ def _make_list(value):
     else:
         res = "[\"{}\"]".format(str(value))
     return res
-
-
-@db_api.context_manager.reader
-def _vnf_lcm_subscriptions_get(context,
-                               notification_type,
-                               operation_type=None
-                               ):
-
-    if notification_type == 'VnfLcmOperationOccurrenceNotification':
-        sql = (
-            "select"
-            " t1.id,t1.callback_uri,t1.subscription_authentication,t2.filter "
-            " from "
-            " vnf_lcm_subscriptions t1, "
-            " (select distinct subscription_uuid,filter from vnf_lcm_filters "
-            " where "
-            " (notification_types_len = 0 \
-                or JSON_CONTAINS(notification_types, '" +
-            _make_list(notification_type) +
-            "')) "
-            " and "
-            " (operation_types_len = 0 or JSON_CONTAINS(operation_types, '" +
-            _make_list(operation_type) +
-            "')) "
-            " order by "
-            "         notification_types_len desc,"
-            "         operation_types_len desc"
-            ") t2 "
-            " where "
-            " t1.id=t2.subscription_uuid "
-            " and t1.deleted=0")
-    else:
-        sql = (
-            "select"
-            " t1.id,t1.callback_uri,t1.subscription_authentication,t2.filter "
-            " from "
-            " vnf_lcm_subscriptions t1, "
-            " (select distinct subscription_uuid,filter from vnf_lcm_filters "
-            " where "
-            " (notification_types_len = 0 or \
-                JSON_CONTAINS(notification_types, '" +
-            _make_list(notification_type) +
-            "')) "
-            " order by "
-            "         notification_types_len desc,"
-            "         operation_types_len desc"
-            ") t2 "
-            " where "
-            " t1.id=t2.subscription_uuid "
-            " and t1.deleted=0")
-
-    result_list = []
-    result = context.session.execute(sql)
-    for line in result:
-        result_list.append(line)
-    return result_list
 
 
 @db_api.context_manager.reader
@@ -162,44 +108,203 @@ def _get_by_subscriptionid(context, subscriptionsId):
 
 
 @db_api.context_manager.reader
-def _vnf_lcm_subscriptions_id_get(context,
-                                  callbackUri,
-                                  notification_type=None,
-                                  operation_type=None
-                                  ):
+def _vnf_lcm_subscriptions_no_instance_filtered(context,
+                                                callback_uri=None,
+                                                notification_types=None,
+                                                operation_types=None,
+                                                operation_states=None
+                                                ):
 
     sql = ("select "
-          "t1.id "
-           "from "
-           "vnf_lcm_subscriptions t1, "
-           "(select subscription_uuid from vnf_lcm_filters "
-           "where ")
+           "t1.id,t1.callback_uri,t1.subscription_authentication,t2.filter "
+           "from vnf_lcm_subscriptions t1, "
+           "(select subscription_uuid,filter from vnf_lcm_filters where ")
 
-    if notification_type:
+    if notification_types:
         sql = (sql + " JSON_CONTAINS(notification_types, '" +
-               _make_list(notification_type) + "') ")
+               _make_list(notification_types) + "') and ")
     else:
-        sql = sql + " notification_types_len=0 "
-    sql = sql + "and "
+        sql = sql + " notification_types_len=0 and "
 
-    if operation_type:
-        sql = sql + " JSON_CONTAINS(operation_types, '" + \
-            _make_list(operation_type) + "') "
-    else:
-        sql = sql + " operation_types_len=0 "
-    sql = (
-        sql +
-        ") t2 where t1.id=t2.subscription_uuid and t1.callback_uri= '" +
-        callbackUri +
-        "' and t1.deleted=0 ")
+    if notification_types == 'VnfLcmOperationOccurrenceNotification':
+        if operation_types:
+            sql = (sql + " JSON_CONTAINS(operation_types, '" +
+                   _make_list(operation_types) + "') and ")
+        else:
+            sql = sql + " operation_types_len=0 and "
+        if operation_states:
+            sql = (sql + " JSON_CONTAINS(operation_states, '" +
+                   _make_list(operation_states) + "') ")
+        else:
+            sql = sql + " operation_states_len=0 "
+
+    sql = sql + ") t2 where t1.id=t2.subscription_uuid and t1.deleted=0"
+    if callback_uri:
+        sql = sql + " and t1.callback_uri= '" + callback_uri
+
     LOG.debug("sql[%s]" % sql)
 
     try:
         result = context.session.execute(sql)
+        result_list = []
         for line in result:
-            return line
+            result_list.append(line)
+        return result_list
     except exceptions.NotFound:
-        return ''
+        return []
+
+
+@db_api.context_manager.reader
+def _vnf_lcm_subscriptions_yield(context,
+                                 callback_uri=None,
+                                 notification_types=None,
+                                 operation_types=None,
+                                 operation_states=None,
+                                 vnfd_ids=None,
+                                 vnf_products_from_providers=None,
+                                 vnf_instance_ids=None,
+                                 vnf_instance_names=None
+                                 ):
+
+    subscriptions = _vnf_lcm_subscriptions_no_instance_filtered(
+        context, callback_uri, notification_types, operation_types,
+        operation_states)
+
+    for subscription in subscriptions:
+        add = True
+        lccn_filter = json.loads(subscription.get("filter", {}))
+        ins_filter = lccn_filter.get("vnfInstanceSubscriptionFilter")
+
+        # filter: $.vnfdIds
+        vnfd_ids_filter = ins_filter.get("vnfdIds")
+        if vnfd_ids_filter and (not vnfd_ids or
+                not set(vnfd_ids).intersection(set(vnfd_ids_filter))):
+            continue
+
+        # filter: $.vnfProductsFromProviders
+        provider_filters = ins_filter.get("vnfProductsFromProviders", [])
+        if provider_filters and not vnf_products_from_providers:
+            continue
+
+        for provider_filter in provider_filters:
+            add = False
+
+            # filter: $.vnfProductsFromProviders[*].vnfProvider
+            matched_products = [p.get("vnfProducts", [])
+                    for p in vnf_products_from_providers
+                    if provider_filter.get("vnfProvider") ==
+                    p.get("vnfProvider")]
+            if len(matched_products) == 0:
+                continue
+
+            add = True
+            for product_filter in provider_filter.get("vnfProducts", []):
+                add = False
+
+                # filter: $.vnfProductsFromProviders[*].vnfProducts[*].
+                #         vnfProductName
+                matched_versions = [p.get("versions", [])
+                        for p in matched_products
+                        if p and product_filter.get("vnfProductName")
+                        == p.get("vnfProductName")]
+                if len(matched_versions) == 0:
+                    continue
+
+                add = True
+                for version_filter in product_filter.get("versions", []):
+                    add = False
+
+                    # filter: $.vnfProductsFromProviders[*].vnfProducts[*].
+                    #         versions[*].vnfSoftwareVersion
+                    matched_vnfd_versions = [p.get("vnfdVersions", [])
+                            for p in matched_versions
+                            if p and version_filter.get("vnfSoftwareVersion")
+                            == p.get("vnfSoftwareVersion")]
+                    if len(matched_vnfd_versions) == 0:
+                        continue
+
+                    # filter: $.vnfProductsFromProviders[*].vnfProducts[*].
+                    #         versions[*].vnfdVersions
+                    vnfd_version_filters = version_filter.get(
+                        "vnfdVersions", [])
+                    if vnfd_version_filters and \
+                            not set(sum(matched_vnfd_versions, [])).\
+                            intersection(set(vnfd_version_filters)):
+                        continue
+
+                    add = True
+                    break
+                if add:
+                    break
+            if add:
+                break
+        if not add:
+            continue
+
+        # filter: $.vnfInstanceIds
+        vnf_instance_ids_filter = ins_filter.get("vnfInstanceIds")
+        if vnf_instance_ids_filter and (not vnf_instance_ids or
+            not set(vnf_instance_ids).intersection(
+                set(vnf_instance_ids_filter))):
+            continue
+
+        # filter: $.vnfInstanceNames
+        vnf_instance_names_filter = ins_filter.get("vnfInstanceNames")
+        if vnf_instance_names_filter and (not vnf_instance_names or
+            not set(vnf_instance_names).intersection(
+                set(vnf_instance_names_filter))):
+            continue
+
+        yield subscription
+
+
+@db_api.context_manager.reader
+def _vnf_lcm_subscriptions_get(context,
+                               notification_types,
+                               operation_types=None,
+                               operation_states=None,
+                               vnfd_ids=None,
+                               vnf_products_from_providers=None,
+                               vnf_instance_ids=None,
+                               vnf_instance_names=None,
+                               ):
+    return [subscription for subscription in
+        _vnf_lcm_subscriptions_yield(
+            context,
+            notification_types=notification_types,
+            operation_types=operation_types,
+            operation_states=operation_states,
+            vnfd_ids=vnfd_ids,
+            vnf_products_from_providers=vnf_products_from_providers,
+            vnf_instance_ids=vnf_instance_ids,
+            vnf_instance_names=vnf_instance_names,
+        )]
+
+
+@db_api.context_manager.reader
+def _vnf_lcm_subscriptions_id_get(context,
+                                  callback_uri,
+                                  notification_types=None,
+                                  operation_types=None,
+                                  operation_states=None,
+                                  vnfd_ids=None,
+                                  vnf_products_from_providers=None,
+                                  vnf_instance_ids=None,
+                                  vnf_instance_names=None,
+                                  ):
+    for subscription in \
+            _vnf_lcm_subscriptions_yield(
+                context,
+                callback_uri=callback_uri,
+                notification_types=notification_types,
+                operation_types=operation_types,
+                operation_states=operation_states,
+                vnfd_ids=vnfd_ids,
+                vnf_products_from_providers=vnf_products_from_providers,
+                vnf_instance_ids=vnf_instance_ids,
+                vnf_instance_names=vnf_instance_names,
+            ):
+        return subscription.get("id")
 
 
 def _add_filter_data(context, subscription_id, filter):
@@ -232,16 +337,29 @@ def _vnf_lcm_subscriptions_create(context, values, filter):
             models.VnfLcmSubscriptions.__table__.insert(None),
             new_entries)
 
-        callbackUri = values.callback_uri
+        callback_uri = values.callback_uri
         if filter:
-            notification_type = filter.get('notificationTypes')
-            operation_type = filter.get('operationTypes')
+            notification_types = filter.get('notificationTypes')
+            operation_types = filter.get('operationTypes')
+            operation_states = filter.get('operationStates')
+
+            vis_filter = filter.get('vnfInstanceSubscriptionFilter', {})
+            vnfd_ids = vis_filter.get('vnfdIds')
+            vnf_products_from_providers = vis_filter.get(
+                'vnfProductsFromProviders')
+            vnf_instance_ids = vis_filter.get('vnfInstanceIds')
+            vnf_instance_names = vis_filter.get('vnfInstanceNames')
 
             vnf_lcm_subscriptions_id = _vnf_lcm_subscriptions_id_get(
                 context,
-                callbackUri,
-                notification_type=notification_type,
-                operation_type=operation_type)
+                callback_uri,
+                notification_types=notification_types,
+                operation_types=operation_types,
+                operation_states=operation_states,
+                vnfd_ids=vnfd_ids,
+                vnf_products_from_providers=vnf_products_from_providers,
+                vnf_instance_ids=vnf_instance_ids,
+                vnf_instance_names=vnf_instance_names)
 
             if vnf_lcm_subscriptions_id:
                 raise Exception("303" + vnf_lcm_subscriptions_id)
@@ -250,7 +368,7 @@ def _vnf_lcm_subscriptions_create(context, values, filter):
 
         else:
             vnf_lcm_subscriptions_id = _vnf_lcm_subscriptions_id_get(context,
-                                            callbackUri)
+                                            callback_uri)
 
             if vnf_lcm_subscriptions_id:
                 raise Exception("303" + vnf_lcm_subscriptions_id.id)
@@ -320,10 +438,43 @@ class LccnSubscriptionRequest(base.TackerObject, base.TackerPersistentObject):
     @base.remotable_classmethod
     def vnf_lcm_subscriptions_get(cls, context,
                                   notification_type,
-                                  operation_type=None):
-        return _vnf_lcm_subscriptions_get(context,
-                                          notification_type,
-                                          operation_type)
+                                  operation_type=None,
+                                  operation_state=None,
+                                  vnf_instances=[]):
+
+        vnfd_ids = []
+        vnf_instance_ids = []
+        vnf_instance_names = []
+        vnf_products_from_providers = []
+        for vnf_instance in vnf_instances:
+            vnf_instance_dict = vnf_instance.to_dict()
+            vnfd_ids.append(vnf_instance_dict.get('vnfd_id'))
+            vnf_instance_ids.append(
+                vnf_instance_dict.get('vnf_instance_id'))
+            vnf_instance_names.append(
+                vnf_instance_dict.get('vnf_instance_name'))
+            vnf_products_from_providers.append({
+                'vnfProvider': vnf_instance_dict.get('vnf_provider'),
+                'vnfProducts': {
+                    'vnfProductName': vnf_instance_dict.get(
+                        'vnf_product_name'),
+                    'versions': {
+                        'vnfSoftwareVersion': vnf_instance_dict.get(
+                            'vnf_software_version'),
+                        'vnfdVersions': vnf_instance_dict.get('vnfd_version')
+                    }
+                }
+            })
+
+        return _vnf_lcm_subscriptions_get(
+            context,
+            notification_type=notification_type,
+            operation_types=operation_type,
+            operation_states=operation_state,
+            vnfd_ids=vnfd_ids,
+            vnf_products_from_providers=vnf_products_from_providers,
+            vnf_instance_ids=vnf_instance_ids,
+            vnf_instance_names=vnf_instance_names)
 
     @base.remotable_classmethod
     def destroy(cls, context, subscriptionId):

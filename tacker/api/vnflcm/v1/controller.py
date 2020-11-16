@@ -306,7 +306,8 @@ class VnfLcmController(wsgi.Controller):
 
         # call send notification
         try:
-            self.rpc_api.send_notification(context, notification)
+            self.rpc_api.send_notification(context, notification,
+                                           [vnf_instance])
         except Exception as ex:
             LOG.error(
                 "Encoutered problem sending notification {}".format(
@@ -458,7 +459,8 @@ class VnfLcmController(wsgi.Controller):
                         'href': self._get_vnf_instance_href(vnf_instance)}}}
 
             # call send_notification
-            self.rpc_api.send_notification(context, notification)
+            self.rpc_api.send_notification(context, notification,
+                                           [vnf_instance])
 
             result = self._view_builder.create(vnf_instance)
             headers = {"location": self._get_vnf_instance_href(vnf_instance)}
@@ -554,7 +556,7 @@ class VnfLcmController(wsgi.Controller):
                 "vnfInstance":
                     "href:{apiRoot}/vnflcm/v1/vnf_instances/{vnfInstanceId}"}}
         # send notification
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
     @check_vnf_state(action="instantiate",
         instantiation_state=[fields.VnfInstanceState.NOT_INSTANTIATED],
@@ -828,27 +830,30 @@ class VnfLcmController(wsgi.Controller):
     def register_subscription(self, request, body):
         subscription_request_data = body
         if subscription_request_data.get('filter'):
-            # notificationTypes check
             notification_types = subscription_request_data.get(
-                "filter").get("notificationTypes")
-            for notification_type in notification_types:
-                if notification_type not in self.notification_type_list:
-                    msg = (
-                        _("notificationTypes value mismatch: %s") %
-                        notification_type)
-                    return self._make_problem_detail(
-                        msg, 400, title='Bad Request')
+                "filter").get("notificationTypes", [])
 
             # operationTypes check
             operation_types = subscription_request_data.get(
-                "filter").get("operationTypes")
-            for operation_type in operation_types:
-                if operation_type not in self.operation_type_list:
-                    msg = (
-                        _("operationTypes value mismatch: %s") %
-                        operation_type)
-                    return self._make_problem_detail(
-                        msg, 400, title='Bad Request')
+                "filter").get("operationTypes", [])
+            if 'VnfLcmOperationOccurrenceNotification' not in \
+                    notification_types and len(operation_types) > 0:
+                msg = "operationTypes shall be absent unless" \
+                      " notificationTypes contains" \
+                      " VnfLcmOperationOccurrenceNotification"
+                return self._make_problem_detail(
+                    msg, 400, title='Bad Request')
+
+            # operationStates check
+            operation_states = subscription_request_data.get(
+                "filter").get("operationStates", [])
+            if 'VnfLcmOperationOccurrenceNotification' not in \
+                    operation_states and len(operation_states) > 0:
+                msg = "operationStates shall be absent unless" \
+                      " notificationTypes contains" \
+                      " VnfLcmOperationOccurrenceNotification"
+                return self._make_problem_detail(
+                    msg, 400, title='Bad Request')
 
         subscription_id = uuidutils.generate_uuid()
 
@@ -1079,7 +1084,7 @@ class VnfLcmController(wsgi.Controller):
         notification['_links']['vnfInstance']['href'] = insta_url
         notification['_links']['vnfLcmOpOcc'] = {}
         notification['_links']['vnfLcmOpOcc']['href'] = vnflcm_url
-        self.rpc_api.send_notification(context, notification)
+        self.rpc_api.send_notification(context, notification, [vnf_instance])
 
         vnf_info['notification'] = notification
 

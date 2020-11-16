@@ -850,6 +850,7 @@ Request Parameters
   - filter: filter
   - notificationTypes: filter_notification_types
   - operationTypes: filter_operation_types
+  - operationStates: filter_operation_states
   - callbackUri : callback_uri
   - authentication: authentication
   - authType: authentication_auth_type
@@ -876,6 +877,7 @@ Response Parameters
   - filter: filter
   - notificationTypes: filter_notification_types
   - operationTypes: filter_operation_types
+  - operationStates: filter_operation_states
   - callbackUri: callback_uri
   - _links: vnf_instance_links
 
@@ -951,6 +953,7 @@ Response Parameters
   - filter: filter
   - notificationTypes: filter_notification_types
   - operationTypes: filter_operation_types
+  - operationStates: filter_operation_states
   - callbackUri: callback_uri
   - _links: vnf_instance_links
 
@@ -990,6 +993,7 @@ Response Parameters
   - filter: filter
   - notificationTypes: filter_notification_types
   - operationTypes: filter_operation_types
+  - operationStates: filter_operation_states
   - callbackUri: callback_uri
   - _links: vnf_instance_links
 
