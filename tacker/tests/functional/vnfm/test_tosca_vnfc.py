@@ -14,7 +14,6 @@ import os
 
 from oslo_config import cfg
 from toscaparser import tosca_template
-import unittest
 import yaml
 
 
@@ -31,7 +30,6 @@ SOFTWARE_DEPLOYMENT = 'OS::Heat::SoftwareDeployment'
 
 class VnfTestToscaVNFC(base.BaseTackerTest):
 
-    @unittest.skip("Until BUG 1673012")
     def test_create_delete_tosca_vnfc(self):
         input_yaml = read_file('sample_tosca_vnfc.yaml')
         tosca_dict = yaml.safe_load(input_yaml)
