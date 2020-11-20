@@ -137,29 +137,6 @@ def _vnf_package_vnfd_get_by_vnfdId(context, vnfdId):
     return result
 
 
-@db_api.context_manager.reader
-def _get_vnf_package_vnfd_by_vnfid(context, vnfpkgid):
-
-    sql = ("select"
-           " t1.vnfd_id,"
-           " t1.vnf_provider,"
-           " t1.vnf_product_name,"
-           " t1.vnf_software_version,"
-           " t1.vnfd_version,"
-           " t2.name"
-           " from "
-           " vnf_package_vnfd t1,"
-           " vnf t2 "
-           " where"
-           " t1.vnfd_id=t2.vnfd_id"
-           " and"
-           " t2.id= :vnfpkgid")
-
-    result = context.session.execute(sql, {'vnfpkgid': vnfpkgid})
-    for line in result:
-        return line
-
-
 @base.TackerObjectRegistry.register
 class VnfPackageVnfd(base.TackerObject, base.TackerObjectDictCompat,
                      base.TackerPersistentObject):
@@ -208,10 +185,6 @@ class VnfPackageVnfd(base.TackerObject, base.TackerObjectDictCompat,
     @base.remotable
     def get_vnf_package_vnfd(self, id, package_uuid=None, del_flg=None):
         return _get_vnf_package_vnfd(self._context, id, package_uuid, del_flg)
-
-    @base.remotable_classmethod
-    def get_vnf_package_vnfd_by_vnfid(self, context, vnfid):
-        return _get_vnf_package_vnfd_by_vnfid(context, vnfid)
 
     @base.remotable
     def delete(self, id):

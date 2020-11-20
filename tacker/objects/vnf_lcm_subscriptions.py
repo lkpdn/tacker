@@ -12,9 +12,9 @@
 
 from oslo_log import log as logging
 from oslo_utils import timeutils
-from sqlalchemy.sql import text
+from sqlalchemy import func
+from sqlalchemy import sql
 
-from tacker.common import exceptions
 import tacker.conf
 from tacker.db import api as db_api
 from tacker.db.db_sqlalchemy import api
@@ -50,115 +50,89 @@ def _vnf_lcm_subscriptions_get(context,
                                operation_type=None
                                ):
 
+    subq = sql.select([models.VnfLcmFilters.subscription_uuid,
+                       models.VnfLcmFilters.filter])
     if notification_type == 'VnfLcmOperationOccurrenceNotification':
-        sql = (
-            "select"
-            " t1.id,t1.callback_uri,t1.subscription_authentication,t2.filter "
-            " from "
-            " vnf_lcm_subscriptions t1, "
-            " (select distinct subscription_uuid,filter from vnf_lcm_filters "
-            " where "
-            " (notification_types_len = 0 \
-                or JSON_CONTAINS(notification_types, '" +
-            _make_list(notification_type) +
-            "')) "
-            " and "
-            " (operation_types_len = 0 or JSON_CONTAINS(operation_types, '" +
-            _make_list(operation_type) +
-            "')) "
-            " order by "
-            "         notification_types_len desc,"
-            "         operation_types_len desc"
-            ") t2 "
-            " where "
-            " t1.id=t2.subscription_uuid "
-            " and t1.deleted=0")
+        subq = subq.where(
+            sql.and_(
+                sql.or_(
+                    models.VnfLcmFilters.notification_types_len == 0,
+                    sql.func.json_contains(
+                        models.VnfLcmFilters.notification_types,
+                        f'"{_make_list(notification_type)}"')
+                ),
+                sql.or_(
+                    models.VnfLcmFilters.operation_types_len == 0,
+                    sql.func.json_contains(
+                        models.VnfLcmFilters.operation_types,
+                        f'"{_make_list(operation_type)}"')
+                )
+            ))
     else:
-        sql = (
-            "select"
-            " t1.id,t1.callback_uri,t1.subscription_authentication,t2.filter "
-            " from "
-            " vnf_lcm_subscriptions t1, "
-            " (select distinct subscription_uuid,filter from vnf_lcm_filters "
-            " where "
-            " (notification_types_len = 0 or \
-                JSON_CONTAINS(notification_types, '" +
-            _make_list(notification_type) +
-            "')) "
-            " order by "
-            "         notification_types_len desc,"
-            "         operation_types_len desc"
-            ") t2 "
-            " where "
-            " t1.id=t2.subscription_uuid "
-            " and t1.deleted=0")
+        subq = subq.where(
+            sql.or_(
+                models.VnfLcmFilters.notification_types_len == 0,
+                func.json_contains(models.VnfLcmFilters.notification_types,
+                                   f'"{_make_list(notification_type)}"')
+            ))
 
-    result_list = []
-    result = context.session.execute(sql)
-    for line in result:
-        result_list.append(line)
-    return result_list
+    subq = subq.distinct().alias()
+    q = sql.select([models.VnfLcmSubscriptions.id,
+                    models.VnfLcmSubscriptions.callback_uri,
+                    models.VnfLcmSubscriptions.subscription_authentication,
+                    models.VnfLcmFilters.filter]).\
+        where(sql.and_(
+            models.VnfLcmSubscriptions.id == subq.subscription_uuid,
+            models.VnfLcmSubscriptions.deleted == 0))
+
+    return context.session.execute(q).all()
 
 
 @db_api.context_manager.reader
 def _vnf_lcm_subscriptions_show(context, subscriptionId):
 
-    sql = text(
-        "select "
-        "t1.id,t1.callback_uri,t2.filter "
-        "from vnf_lcm_subscriptions t1, "
-        "(select distinct subscription_uuid,filter from vnf_lcm_filters) t2 "
-        "where t1.id = t2.subscription_uuid "
-        "and deleted = 0 "
-        "and t1.id = :subsc_id")
-    result_line = ""
-    try:
-        result = context.session.execute(sql, {'subsc_id': subscriptionId})
-        for line in result:
-            result_line = line
-    except exceptions.NotFound:
-        return ''
-    except Exception as e:
-        raise e
-    return result_line
+    subq = sql.select([models.VnfLcmFilters.subscription_uuid,
+                       models.VnfLcmFilters.filter]).\
+        distinct().\
+        alias()
+
+    q = sql.select([models.VnfLcmSubscriptions.id,
+                    models.VnfLcmSubscriptions.callback_uri,
+                    models.VnfLcmFilters.filter]).\
+        where(sql.and_(
+            models.VnfLcmSubscriptions.id == subscriptionId,
+            models.VnfLcmSubscriptions.id == subq.subscription_uuid,
+            models.VnfLcmSubscriptions.deleted == 0))
+
+    return context.session.execute(q).first()
 
 
 @db_api.context_manager.reader
 def _vnf_lcm_subscriptions_all(context):
 
-    sql = text(
-        "select "
-        "t1.id,t1.callback_uri,t2.filter "
-        "from vnf_lcm_subscriptions t1, "
-        "(select distinct subscription_uuid,filter from vnf_lcm_filters) t2 "
-        "where t1.id = t2.subscription_uuid "
-        "and deleted = 0 ")
-    result_list = []
-    try:
-        result = context.session.execute(sql)
-        for line in result:
-            result_list.append(line)
-    except Exception as e:
-        raise e
+    subq = sql.select([models.VnfLcmFilters.subscription_uuid,
+                       models.VnfLcmFilters.filter]).\
+        distinct().\
+        alias()
 
-    return result_list
+    q = sql.select([models.VnfLcmSubscriptions.id,
+                    models.VnfLcmSubscriptions.callback_uri,
+                    models.VnfLcmFilters.filter]).\
+        where(sql.and_(
+            models.VnfLcmSubscriptions.id == subq.subscription_uuid,
+            models.VnfLcmSubscriptions.deleted == 0))
+
+    return context.session.execute(q).all()
 
 
 @db_api.context_manager.reader
 def _get_by_subscriptionid(context, subscriptionsId):
 
-    sql = text("select id "
-             "from vnf_lcm_subscriptions "
-             "where id = :subsc_id "
-             "and deleted = 0 ")
-    try:
-        result = context.session.execute(sql, {'subsc_id': subscriptionsId})
-    except exceptions.NotFound:
-        return ''
-    except Exception as e:
-        raise e
+    query = api.model_query(context, models.VnfLcmSubscriptions,
+                            read_deleted="no").\
+        filter_by(id=subscriptionsId)
 
-    return result
+    return query.first()
 
 
 @db_api.context_manager.reader
@@ -168,38 +142,33 @@ def _vnf_lcm_subscriptions_id_get(context,
                                   operation_type=None
                                   ):
 
-    sql = ("select "
-          "t1.id "
-           "from "
-           "vnf_lcm_subscriptions t1, "
-           "(select subscription_uuid from vnf_lcm_filters "
-           "where ")
-
+    subq = sql.select([models.VnfLcmFilters.subscription_uuid])
     if notification_type:
-        sql = (sql + " JSON_CONTAINS(notification_types, '" +
-               _make_list(notification_type) + "') ")
+        subq = subq.where(
+            sql.func.json_contains(
+                models.VnfLcmFilters.notification_types,
+                f'"{_make_list(notification_type)}"'))
     else:
-        sql = sql + " notification_types_len=0 "
-    sql = sql + "and "
+        subq = subq.where(
+            models.VnfLcmFilters.notification_types_len == 0)
 
     if operation_type:
-        sql = sql + " JSON_CONTAINS(operation_types, '" + \
-            _make_list(operation_type) + "') "
+        subq = subq.where(
+            sql.func.json_contains(
+                models.VnfLcmFilters.operation_types,
+                f'"{_make_list(operation_type)}"'))
     else:
-        sql = sql + " operation_types_len=0 "
-    sql = (
-        sql +
-        ") t2 where t1.id=t2.subscription_uuid and t1.callback_uri= '" +
-        callbackUri +
-        "' and t1.deleted=0 ")
-    LOG.debug("sql[%s]" % sql)
+        subq = subq.where(
+            models.VnfLcmFilters.operation_types_len == 0)
 
-    try:
-        result = context.session.execute(sql)
-        for line in result:
-            return line
-    except exceptions.NotFound:
-        return ''
+    subq = subq.alias()
+    q = sql.select([models.VnfLcmSubscriptions.id]).\
+        where(sql.and_(
+            models.VnfLcmSubscriptions.id == subq.subscription_uuid,
+            models.VnfLcmSubscriptions.callback_uri == callbackUri,
+            models.VnfLcmSubscriptions.deleted == 0))
+
+    return context.session.execute(q).all()
 
 
 def _add_filter_data(context, subscription_id, filter):
